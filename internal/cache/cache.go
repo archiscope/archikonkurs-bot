@@ -7,12 +7,18 @@ import (
 	"os"
 )
 
+type CacheBufSizeError struct{}
+
+func (err *CacheBufSizeError) Error() string {
+	return "bufSize value must be less than 10"
+}
+
 func main() {
-	cache, err := NewFileCache("./cache.txt")
+	cache, err := NewFileCache("./cache.txt", 9)
 	if err != nil {
 		log.Fatal(err)
 	}
-	cache.Save("abcdefg")
+	cache.Save("Item1")
 }
 
 type Cacher interface {
@@ -20,18 +26,22 @@ type Cacher interface {
 	Save([]byte) error
 }
 
-func NewFileCache(path string) (fileCache *FileCache, err error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		_, err = os.Create(path)
+func NewFileCache(filePath string, bufSize int) (fileCache *FileCache, err error) {
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		_, err = os.Create(filePath)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return &FileCache{filePath: path}, nil
+	if bufSize > 10 {
+		return nil, &CacheBufSizeError{}
+	}
+	return &FileCache{filePath: filePath, bufSize: bufSize}, nil
 }
 
 type FileCache struct {
 	filePath string
+	bufSize  int
 }
 
 func (fc FileCache) Get() (entry string, err error) {
@@ -61,20 +71,20 @@ func (fc FileCache) Save(item string) error {
 		log.Fatal(err)
 	}
 	defer tempFile.Close()
-	reader := bufio.NewReader(cacheFile)
-	scanner := bufio.NewScanner(reader)
+	scanner := bufio.NewScanner(bufio.NewReader(cacheFile))
 	writer := bufio.NewWriter(tempFile)
 	_, err = io.WriteString(writer, item+"\n")
 
-	for scanner.Scan() {
+	for i := 0; i < fc.bufSize; i++ {
+		scanner.Scan()
 		line := scanner.Text()
 		_, err = writer.WriteString(line + "\n")
 		log.Print(line)
 	}
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
 	writer.Flush()
-	// if err := scanner.Err(); err != nil {
-	// 	log.Fatal(err)
-	// }
-	// _ = os.Rename(tempFile.Name(), cacheFile.Name())
+	_ = os.Rename(tempFile.Name(), cacheFile.Name())
 	return err
 }
